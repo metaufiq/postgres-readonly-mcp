@@ -6,7 +6,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { Server as HttpServer } from "node:http";
-import { ConnectionManager } from "./manager.js";
+import { ConnectionManager, assertReadOnlySql } from "./manager.js";
 import { startWebServer } from "./web.js";
 import * as store from "./store.js";
 
@@ -88,8 +88,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const conn = String(a.connection ?? "");
 
     if (name === "query") {
+      const sql = String(a.sql ?? "");
+      assertReadOnlySql(sql);
       const result = await manager.runReadOnly(conn, (client) =>
-        client.query(String(a.sql ?? "")),
+        client.query(sql),
       );
       return {
         content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }],

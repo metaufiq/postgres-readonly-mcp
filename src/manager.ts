@@ -12,6 +12,29 @@ interface PgError {
   toString?: () => string;
 }
 
+const ALLOWED_LEADING_KEYWORD = /^(with|select|explain|show)\b/i;
+
+export function assertReadOnlySql(sql: string): void {
+  const stripped = sql
+    .replace(/--[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:""|[^"])*"/g, '""')
+    .replace(/\$([A-Za-z_]\w*)?\$[\s\S]*?\$\1\$/g, "''")
+    .trim();
+
+  if (!ALLOWED_LEADING_KEYWORD.test(stripped)) {
+    throw new Error(
+      "Only SELECT, WITH, EXPLAIN, or SHOW statements are allowed.",
+    );
+  }
+
+  const withoutTrailingSemi = stripped.replace(/;\s*$/, "");
+  if (withoutTrailingSemi.includes(";")) {
+    throw new Error("Multiple statements are not allowed.");
+  }
+}
+
 function describeError(err: PgError | null | undefined): string {
   if (!err) return "unknown error";
   const parts: string[] = [];
@@ -79,6 +102,9 @@ export class ConnectionManager {
     const client = await pool.connect();
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
+      await client.query("SET LOCAL statement_timeout = '15s'");
+      await client.query("SET LOCAL lock_timeout = '2s'");
+      await client.query("SET LOCAL idle_in_transaction_session_timeout = '15s'");
       return await fn(client);
     } finally {
       try {
