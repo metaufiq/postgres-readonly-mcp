@@ -28,6 +28,10 @@ export const HTML = `<!doctype html>
   details { margin-top: .75rem; }
   summary { cursor: pointer; color: #2563eb; font-size: 13px; user-select: none; }
   h3 { margin: 0 0 .75rem 0; }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .modal { background: Canvas; color: CanvasText; border: 1px solid rgba(127,127,127,.4); border-radius: 8px; padding: 1.25rem; width: 100%; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+  .modal h3 { margin-top: 0; }
+  .modal .actions { justify-content: flex-end; margin-top: 1rem; }
 </style>
 </head>
 <body>
@@ -115,10 +119,40 @@ function renderCard(c) {
   + '</div>';
 }
 
+function askPassword(name) {
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML =
+      '<div class="modal" role="dialog" aria-modal="true">'
+        + '<h3>Connect to "' + esc(name) + '"</h3>'
+        + '<div class="field">'
+          + '<label>Password (leave blank if using .pgpass or trust auth)</label>'
+          + '<input id="pw-input" type="password" autocomplete="current-password">'
+        + '</div>'
+        + '<div class="actions">'
+          + '<button id="pw-cancel">Cancel</button>'
+          + '<button id="pw-ok" class="primary">Connect</button>'
+        + '</div>'
+      + '</div>';
+    document.body.appendChild(backdrop);
+    const input = backdrop.querySelector('#pw-input');
+    const cleanup = (val) => { document.body.removeChild(backdrop); resolve(val); };
+    backdrop.querySelector('#pw-ok').onclick = () => cleanup(input.value);
+    backdrop.querySelector('#pw-cancel').onclick = () => cleanup(null);
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) cleanup(null); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') cleanup(input.value);
+      else if (e.key === 'Escape') cleanup(null);
+    });
+    input.focus();
+  });
+}
+
 async function act(name, action) {
   let opts = { method: 'POST' };
   if (action === 'connect') {
-    const pw = prompt('Password for "' + name + '" (leave blank if using .pgpass or trust auth):');
+    const pw = await askPassword(name);
     if (pw === null) return;
     opts.body = JSON.stringify({ password: pw });
   }
