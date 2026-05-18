@@ -1,6 +1,7 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -14,7 +15,7 @@ const port = Number(process.env.PORT || 7432);
 const manager = new ConnectionManager();
 
 const server = new Server(
-  { name: "postgres-readonly-mcp", version: "0.2.0" },
+  { name: "postgres-readonly-mcp", version: "0.3.0" },
   { capabilities: { tools: {} } },
 );
 
@@ -138,6 +139,10 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 });
 
+const transport = new StreamableHTTPServerTransport({
+  sessionIdGenerator: () => randomUUID(),
+});
+
 let webServer: HttpServer | undefined;
 let shuttingDown = false;
 async function shutdown(): Promise<void> {
@@ -146,6 +151,9 @@ async function shutdown(): Promise<void> {
   try {
     webServer?.close();
   } catch {}
+  try {
+    await transport.close();
+  } catch {}
   await manager.closeAll();
   process.exit(0);
 }
@@ -153,16 +161,26 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 async function main(): Promise<void> {
-  const { server: wsv, url } = await startWebServer({ manager, port });
-  webServer = wsv;
-  console.error(`postgres-readonly-mcp v0.2.0`);
-  console.error(`Management UI: ${url}`);
-  console.error(`Config file:   ${store.configPath()}`);
-  const transport = new StdioServerTransport();
   await server.connect(transport);
+  const { server: wsv, url } = await startWebServer({
+    manager,
+    port,
+    mcpHandler: (req, res) => transport.handleRequest(req, res),
+  });
+  webServer = wsv;
+  console.error(`postgres-readonly-mcp v0.3.0`);
+  console.error(`Management UI: ${url}`);
+  console.error(`MCP endpoint:  ${url}/mcp`);
+  console.error(`Config file:   ${store.configPath()}`);
 }
 
-main().catch((err) => {
+main().catch((err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `Port ${port} is in use. Another postgres-readonly-mcp is already running — point Claude at http://127.0.0.1:${port}/mcp instead of spawning a new one.`,
+    );
+    process.exit(0);
+  }
   console.error("Fatal:", err);
   process.exit(1);
 });

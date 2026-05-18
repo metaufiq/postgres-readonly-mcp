@@ -58,10 +58,16 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
+export type McpRequestHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+) => Promise<void> | void;
+
 export interface StartWebServerOptions {
   manager: ConnectionManager;
   port?: number;
   host?: string;
+  mcpHandler?: McpRequestHandler;
 }
 
 export interface StartWebServerResult {
@@ -73,6 +79,7 @@ export function startWebServer({
   manager,
   port = 7432,
   host = "127.0.0.1",
+  mcpHandler,
 }: StartWebServerOptions): Promise<StartWebServerResult> {
   const server = http.createServer(async (req, res) => {
     try {
@@ -80,6 +87,11 @@ export function startWebServer({
         req.url ?? "/",
         `http://${req.headers.host || "localhost"}`,
       );
+
+      if (mcpHandler && u.pathname === "/mcp") {
+        await mcpHandler(req, res);
+        return;
+      }
 
       if (req.method === "GET" && u.pathname === "/") {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

@@ -4,20 +4,23 @@ A Node.js [Model Context Protocol](https://modelcontextprotocol.io) server that 
 
 Every query runs inside a `BEGIN TRANSACTION READ ONLY` block and is rolled back, so writes are blocked at the DB level even if the role has write privileges.
 
+The server speaks MCP over **Streamable HTTP**, so a single instance can be shared by multiple MCP clients (e.g. several Claude Code sessions) simultaneously — all hitting the same pool of active DB connections.
+
 ## How it works
 
-1. Start the MCP server.
-2. It boots a small local **management UI** on `http://127.0.0.1:7432` (printed to stderr on start).
-3. Open the UI in a browser to:
+1. Start the MCP server once. It binds `http://127.0.0.1:7432`, serving:
+   - `/`     — local **management UI**
+   - `/mcp`  — MCP Streamable HTTP endpoint for clients
+2. Open the UI in a browser to:
    - Paste a PostgreSQL URL and give it a name.
    - See the list of saved connections.
    - **Connect / Disconnect** any saved connection.
    - Click a connection to edit its name, URL, or password.
    - Delete a connection.
-4. MCP tools query whichever connections are currently active by name.
-5. When the MCP server shuts down (SIGINT/SIGTERM), all DB pools are closed. Saved configs persist in `~/.postgres-readonly-mcp/connections.json`. To reconnect after restart, open the UI again and click **Connect**.
+3. MCP tools query whichever connections are currently active by name.
+4. When the MCP server shuts down (SIGINT/SIGTERM), all DB pools are closed. Saved configs persist in `~/.postgres-readonly-mcp/connections.json`. To reconnect after restart, open the UI again and click **Connect**.
 
-The management UI is bound to `127.0.0.1` only and never leaves your machine.
+Both the management UI and the MCP endpoint are bound to `127.0.0.1` only and never leave your machine.
 
 ## Install & run
 
@@ -26,10 +29,13 @@ npm install
 npm run build
 npm start
 # stderr:
-#   postgres-readonly-mcp v0.2.0
+#   postgres-readonly-mcp v0.3.0
 #   Management UI: http://127.0.0.1:7432
+#   MCP endpoint:  http://127.0.0.1:7432/mcp
 #   Config file:   /Users/<you>/.postgres-readonly-mcp/connections.json
 ```
+
+Run this once and leave it running (e.g. in a terminal tab, tmux pane, or as a `launchd` agent). All MCP clients connect to the same `/mcp` URL.
 
 For development with auto-reload (uses `tsx`):
 
@@ -54,20 +60,24 @@ PORT=8123 npm start
 
 If a tool targets a connection that isn't active, it returns an error telling you to open the management UI and connect.
 
-## Configure in Claude Desktop
+## Configure in MCP clients
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Once the server is running, point any MCP client at `http://127.0.0.1:7432/mcp`.
+
+**Claude Code** — in your project's `.mcp.json` (or `~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "postgres-readonly": {
-      "command": "node",
-      "args": ["/absolute/path/to/postgres-readonly-mcp/dist/index.js"]
+      "type": "http",
+      "url": "http://127.0.0.1:7432/mcp"
     }
   }
 }
 ```
+
+**Claude Desktop** — in `~/Library/Application Support/Claude/claude_desktop_config.json`, same shape. Claude Desktop will share the running server with every Claude Code session.
 
 ## Storage
 

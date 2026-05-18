@@ -1,6 +1,6 @@
 {
   "name": "postgres-readonly-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A Model Context Protocol (MCP) server exposing read-only access to a PostgreSQL database.",
   "type": "module",
   "main": "dist/index.js",
