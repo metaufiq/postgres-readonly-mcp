@@ -1,0 +1,14 @@
+services:
+  postgres-readonly-mcp:
+    build: .
+    image: postgres-readonly-mcp:local
+    container_name: postgres-readonly-mcp
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0"
+    ports:
+      - "127.0.0.1:7432:7432"
+    volumes:
+      - ./connections.json:/app/connections.json
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -12,6 +12,7 @@ import { startWebServer } from "./web.js";
 import * as store from "./store.js";
 
 const port = Number(process.env.PORT || 7432);
+const host = process.env.HOST || "127.0.0.1";
 const manager = new ConnectionManager();
 
 const server = new Server(
@@ -162,12 +163,15 @@ process.on("SIGTERM", shutdown);
 
 async function main(): Promise<void> {
   await server.connect(transport);
-  const { server: wsv, url } = await startWebServer({
+  const { server: wsv } = await startWebServer({
     manager,
     port,
+    host,
     mcpHandler: (req, res) => transport.handleRequest(req, res),
   });
   webServer = wsv;
+  const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
+  const url = `http://${displayHost}:${port}`;
   console.error(`postgres-readonly-mcp v0.3.0`);
   console.error(`Management UI: ${url}`);
   console.error(`MCP endpoint:  ${url}/mcp`);

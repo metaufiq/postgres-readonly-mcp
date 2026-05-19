@@ -18,11 +18,32 @@ The server speaks MCP over **Streamable HTTP**, so a single instance can be shar
    - Click a connection to edit its name, URL, or password.
    - Delete a connection.
 3. MCP tools query whichever connections are currently active by name.
-4. When the MCP server shuts down (SIGINT/SIGTERM), all DB pools are closed. Saved configs persist in `~/.postgres-readonly-mcp/connections.json`. To reconnect after restart, open the UI again and click **Connect**.
+4. When the MCP server shuts down (SIGINT/SIGTERM), all DB pools are closed. Saved configs persist in `connections.json` next to the server binary. To reconnect after restart, open the UI again and click **Connect**.
 
 Both the management UI and the MCP endpoint are bound to `127.0.0.1` only and never leave your machine.
 
 ## Install & run
+
+### Option A — Docker (recommended)
+
+```bash
+docker compose up -d --build
+```
+
+This builds the image and starts a long-running container that publishes the UI + MCP endpoint on `127.0.0.1:7432`. The container restarts automatically (`unless-stopped`), and `connections.json` is bind-mounted from the repo so saved configs persist on the host.
+
+Common commands:
+
+```bash
+docker compose logs -f          # follow logs
+docker compose restart          # restart after editing connections.json by hand
+docker compose down             # stop and remove the container
+docker compose up -d --build    # rebuild after pulling new code
+```
+
+**Connecting to a Postgres on your host machine:** inside the container, `localhost` refers to the container itself. Use `host.docker.internal` as the host in your connection URL instead — the `extra_hosts` mapping in `docker-compose.yml` makes this work on Linux as well as macOS/Windows.
+
+### Option B — Run with Node directly
 
 ```bash
 npm install
@@ -32,7 +53,7 @@ npm start
 #   postgres-readonly-mcp v0.3.0
 #   Management UI: http://127.0.0.1:7432
 #   MCP endpoint:  http://127.0.0.1:7432/mcp
-#   Config file:   /Users/<you>/.postgres-readonly-mcp/connections.json
+#   Config file:   <repo>/connections.json
 ```
 
 Run this once and leave it running (e.g. in a terminal tab, tmux pane, or as a `launchd` agent). All MCP clients connect to the same `/mcp` URL.
@@ -48,6 +69,8 @@ Override the UI port:
 ```bash
 PORT=8123 npm start
 ```
+
+(When running under Docker, override the port by changing the published port in `docker-compose.yml` rather than setting `PORT`.)
 
 ## MCP tools
 
@@ -81,7 +104,7 @@ Once the server is running, point any MCP client at `http://127.0.0.1:7432/mcp`.
 
 ## Storage
 
-Saved connections live in `~/.postgres-readonly-mcp/connections.json` (mode `0600`). The file stores the PostgreSQL URL **with the password stripped** — only host, port, user, and database name are persisted. Passwords are entered at the management UI on each `Connect` and live only in the pg pool's memory; they are never written to disk. After the MCP server restarts, you must re-enter the password to reconnect.
+Saved connections live in `connections.json` at the repo root (mode `0600`, gitignored). Under Docker this file is bind-mounted into the container, so edits made in the UI persist on the host. The file stores the PostgreSQL URL **with the password stripped** — only host, port, user, and database name are persisted. Passwords are entered at the management UI on each `Connect` and live only in the pg pool's memory; they are never written to disk. After the MCP server restarts, you must re-enter the password to reconnect.
 
 On first load after upgrading, any password embedded in an existing `connections.json` is automatically stripped from the file.
 
@@ -89,7 +112,7 @@ On first load after upgrading, any password embedded in an existing `connections
 
 ```
 src/
-  index.ts     # MCP server entry — wires stdio MCP transport + web UI
+  index.ts     # MCP server entry — wires Streamable HTTP MCP transport + web UI
   store.ts     # Read/write connections.json
   manager.ts   # In-memory pg pools, keyed by connection name
   web.ts       # Local HTTP server: JSON API + serves the UI
