@@ -4,9 +4,14 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
+  isInitializeRequest,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { Server as HttpServer } from "node:http";
+import type {
+  IncomingMessage,
+  Server as HttpServer,
+  ServerResponse,
+} from "node:http";
 import { ConnectionManager, assertReadOnlySql } from "./manager.js";
 import { startWebServer } from "./web.js";
 import * as store from "./store.js";
@@ -15,13 +20,7 @@ const port = Number(process.env.PORT || 7432);
 const host = process.env.HOST || "127.0.0.1";
 const manager = new ConnectionManager();
 
-const server = new Server(
-  { name: "postgres-readonly-mcp", version: "0.3.0" },
-  { capabilities: { tools: {} } },
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: [
+const TOOLS = [
     {
       name: "list_connections",
       description:
@@ -69,8 +68,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["connection", "table"],
       },
     },
-  ],
-}));
+];
 
 type ToolArgs = Record<string, unknown>;
 type ToolResult = { content: { type: "text"; text: string }[] };
@@ -128,23 +126,106 @@ const toolHandlers: Record<string, ToolHandler> = {
   },
 };
 
-server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const { name, arguments: args = {} } = req.params;
-  const handler = toolHandlers[name];
-  try {
-    if (!handler) throw new Error(`Unknown tool: ${name}`);
-    return await handler(args as ToolArgs);
-  } catch (err) {
-    return {
-      content: [{ type: "text", text: `Error: ${(err as Error).message}` }],
-      isError: true,
-    };
-  }
-});
+function createMcpServer(): Server {
+  const server = new Server(
+    { name: "postgres-readonly-mcp", version: "0.3.0" },
+    { capabilities: { tools: {} } },
+  );
 
-const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: () => randomUUID(),
-});
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: TOOLS,
+  }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const { name, arguments: args = {} } = req.params;
+    const handler = toolHandlers[name];
+    try {
+      if (!handler) throw new Error(`Unknown tool: ${name}`);
+      return await handler(args as ToolArgs);
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: `Error: ${(err as Error).message}` }],
+        isError: true,
+      };
+    }
+  });
+
+  return server;
+}
+
+const transports = new Map<string, StreamableHTTPServerTransport>();
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  const text = Buffer.concat(chunks).toString("utf8");
+  return text ? JSON.parse(text) : undefined;
+}
+
+function jsonRpcError(
+  res: ServerResponse,
+  status: number,
+  code: number,
+  message: string,
+): void {
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: { code, message },
+      id: null,
+    }),
+  );
+}
+
+async function mcpHandler(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const sessionId = req.headers["mcp-session-id"];
+  const sid = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+
+  if (sid) {
+    const existing = transports.get(sid);
+    if (!existing) {
+      jsonRpcError(res, 404, -32001, "Session not found");
+      return;
+    }
+    await existing.handleRequest(req, res);
+    return;
+  }
+
+  if (req.method !== "POST") {
+    jsonRpcError(res, 400, -32000, "Missing Mcp-Session-Id header");
+    return;
+  }
+
+  let body: unknown;
+  try {
+    body = await readBody(req);
+  } catch {
+    jsonRpcError(res, 400, -32700, "Parse error");
+    return;
+  }
+
+  if (!isInitializeRequest(body)) {
+    jsonRpcError(res, 400, -32600, "Invalid Request: expected initialize");
+    return;
+  }
+
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (newSid) => {
+      transports.set(newSid, transport);
+    },
+  });
+  transport.onclose = () => {
+    if (transport.sessionId) transports.delete(transport.sessionId);
+  };
+  const mcpServer = createMcpServer();
+  await mcpServer.connect(transport);
+  await transport.handleRequest(req, res, body);
+}
 
 let webServer: HttpServer | undefined;
 let shuttingDown = false;
@@ -154,9 +235,12 @@ async function shutdown(): Promise<void> {
   try {
     webServer?.close();
   } catch {}
-  try {
-    await transport.close();
-  } catch {}
+  for (const t of transports.values()) {
+    try {
+      await t.close();
+    } catch {}
+  }
+  transports.clear();
   await manager.closeAll();
   process.exit(0);
 }
@@ -164,12 +248,11 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 async function main(): Promise<void> {
-  await server.connect(transport);
   const { server: wsv } = await startWebServer({
     manager,
     port,
     host,
-    mcpHandler: (req, res) => transport.handleRequest(req, res),
+    mcpHandler,
   });
   webServer = wsv;
   const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
