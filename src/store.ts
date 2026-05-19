@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
+import { fileURLToPath } from "node:url";
 
-const DIR = path.join(os.homedir(), ".postgres-readonly-mcp");
+const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = path.join(DIR, "connections.json");
 
 export interface Connection {
