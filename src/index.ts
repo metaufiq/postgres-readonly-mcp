@@ -72,66 +72,68 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
+type ToolArgs = Record<string, unknown>;
+type ToolResult = { content: { type: "text"; text: string }[] };
+type ToolHandler = (args: ToolArgs) => Promise<ToolResult>;
+
+const textResult = (value: unknown): ToolResult => ({
+  content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+});
+
+const toolHandlers: Record<string, ToolHandler> = {
+  async list_connections() {
+    const saved = await store.loadAll();
+    return textResult(
+      saved.map((c) => ({ name: c.name, active: manager.isActive(c.name) })),
+    );
+  },
+
+  async query(a) {
+    const conn = String(a.connection ?? "");
+    const sql = String(a.sql ?? "");
+    assertReadOnlySql(sql);
+    const result = await manager.runReadOnly(conn, (client) =>
+      client.query(sql),
+    );
+    return textResult(result.rows);
+  },
+
+  async list_tables(a) {
+    const conn = String(a.connection ?? "");
+    const schema = a.schema ? String(a.schema) : null;
+    const result = await manager.runReadOnly(conn, (client) =>
+      schema
+        ? client.query(
+            "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name",
+            [schema],
+          )
+        : client.query(
+            "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name",
+          ),
+    );
+    return textResult(result.rows);
+  },
+
+  async describe_table(a) {
+    const conn = String(a.connection ?? "");
+    const schema = a.schema ? String(a.schema) : "public";
+    const table = String(a.table ?? "");
+    const result = await manager.runReadOnly(conn, (client) =>
+      client.query(
+        "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position",
+        [schema, table],
+      ),
+    );
+    return textResult(result.rows);
+  },
+};
+
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args = {} } = req.params;
-  const a = args as Record<string, unknown>;
+  const handler = toolHandlers[name];
   try {
-    if (name === "list_connections") {
-      const saved = await store.loadAll();
-      const out = saved.map((c) => ({
-        name: c.name,
-        active: manager.isActive(c.name),
-      }));
-      return {
-        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
-      };
-    }
-
-    const conn = String(a.connection ?? "");
-
-    if (name === "query") {
-      const sql = String(a.sql ?? "");
-      assertReadOnlySql(sql);
-      const result = await manager.runReadOnly(conn, (client) =>
-        client.query(sql),
-      );
-      return {
-        content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }],
-      };
-    }
-
-    if (name === "list_tables") {
-      const schema = a.schema ? String(a.schema) : null;
-      const result = await manager.runReadOnly(conn, (client) =>
-        schema
-          ? client.query(
-              "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name",
-              [schema],
-            )
-          : client.query(
-              "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name",
-            ),
-      );
-      return {
-        content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }],
-      };
-    }
-
-    if (name === "describe_table") {
-      const schema = a.schema ? String(a.schema) : "public";
-      const table = String(a.table ?? "");
-      const result = await manager.runReadOnly(conn, (client) =>
-        client.query(
-          "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position",
-          [schema, table],
-        ),
-      );
-      return {
-        content: [{ type: "text", text: JSON.stringify(result.rows, null, 2) }],
-      };
-    }
-
-    throw new Error(`Unknown tool: ${name}`);
+    if (!handler) throw new Error(`Unknown tool: ${name}`);
+    return await handler(args as ToolArgs);
   } catch (err) {
     return {
       content: [{ type: "text", text: `Error: ${(err as Error).message}` }],
