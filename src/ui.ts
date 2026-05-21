@@ -22,6 +22,10 @@ export const HTML = `<!doctype html>
   input { font: inherit; padding: 6px 8px; border: 1px solid rgba(127,127,127,.4); border-radius: 4px; width: 100%; background: transparent; color: inherit; box-sizing: border-box; }
   .field { margin-bottom: .5rem; }
   .field label { display: block; font-size: 12px; color: #888; margin-bottom: 3px; }
+  .checkbox-field { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+  .checkbox-field input { width: auto; }
+  .checkbox-field label { margin: 0; color: inherit; font-size: 13px; }
+  .hint { color: #888; font-size: 12px; margin-top: -.25rem; margin-bottom: .5rem; }
   .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
   .empty { color: #888; text-align: center; padding: 1.25rem; }
   .error { color: #dc2626; margin-top: .5rem; font-size: 13px; }
@@ -36,7 +40,7 @@ export const HTML = `<!doctype html>
 </head>
 <body>
   <h1>Postgres Read-Only MCP</h1>
-  <div class="subtitle">Manage saved database connections. Passwords are never written to disk — they live in memory only while a connection is active, and must be re-entered after the MCP server restarts.</div>
+  <div class="subtitle">Manage saved database connections. By default passwords are stripped from the URL before being written to disk and must be re-entered on each Connect. Tick <em>Save password</em> to persist the password in <code>connections.json</code> instead.</div>
 
   <div id="list"></div>
 
@@ -49,6 +53,10 @@ export const HTML = `<!doctype html>
     <div class="field">
       <label>Postgres URL</label>
       <input id="new-url" placeholder="postgresql://user:password@host:5432/dbname" autocomplete="off">
+    </div>
+    <div class="checkbox-field">
+      <input type="checkbox" id="new-save-pw">
+      <label for="new-save-pw">Save password in connections.json (skips the prompt on Connect)</label>
     </div>
     <div class="actions">
       <button class="primary" onclick="addConn()">Save & Connect</button>
@@ -95,7 +103,7 @@ function renderCard(c) {
   const id = 'c-' + encodeURIComponent(c.name).replace(/%/g, '_');
   const connectBtn = c.active
     ? '<button onclick="act(\\'' + n + '\\', \\'disconnect\\')">Disconnect</button>'
-    : '<button class="primary" onclick="act(\\'' + n + '\\', \\'connect\\')">Connect</button>';
+    : '<button class="primary" onclick="act(\\'' + n + '\\', \\'connect\\', ' + (c.has_saved_password ? 'true' : 'false') + ')">Connect</button>';
   return '<div class="card" id="' + id + '">'
     + '<div class="row">'
       + '<div style="flex:1; min-width:200px">'
@@ -112,7 +120,15 @@ function renderCard(c) {
       + '<div style="margin-top:.75rem">'
         + '<div class="field"><label>Name</label><input id="' + id + '-name" value="' + esc(c.name) + '"></div>'
         + '<div class="field"><label>Postgres URL (leave blank to keep current)</label><input id="' + id + '-url" placeholder="postgresql://..."></div>'
-        + '<div class="actions"><button class="primary" onclick="save(\\'' + n + '\\', \\'' + id + '\\')">Save changes</button></div>'
+        + '<div class="checkbox-field">'
+          + '<input type="checkbox" id="' + id + '-save-pw"' + (c.save_password ? ' checked' : '') + '>'
+          + '<label for="' + id + '-save-pw">Save password in connections.json</label>'
+        + '</div>'
+        + '<div class="hint">' + (c.has_saved_password
+            ? 'A password is currently stored for this connection.'
+            : 'To store a password, provide a URL above that includes one and tick the box.')
+          + '</div>'
+        + '<div class="actions"><button class="primary" onclick="save(\\'' + n + '\\', \\'' + id + '\\', ' + (c.save_password ? 'true' : 'false') + ')">Save changes</button></div>'
         + '<div id="' + id + '-err" class="error"></div>'
       + '</div>'
     + '</details>'
@@ -149,9 +165,9 @@ function askPassword(name) {
   });
 }
 
-async function act(name, action) {
+async function act(name, action, hasSavedPassword) {
   let opts = { method: 'POST' };
-  if (action === 'connect') {
+  if (action === 'connect' && !hasSavedPassword) {
     const pw = await askPassword(name);
     if (pw === null) return;
     opts.body = JSON.stringify({ password: pw });
@@ -167,12 +183,14 @@ async function del(name) {
   catch (e) { alert(e.message); }
 }
 
-async function save(name, id) {
+async function save(name, id, previousSavePassword) {
   const newName = document.getElementById(id + '-name').value.trim();
   const newUrl = document.getElementById(id + '-url').value.trim();
+  const savePassword = document.getElementById(id + '-save-pw').checked;
   const body = {};
   if (newName && newName !== name) body.name = newName;
   if (newUrl) body.url = newUrl;
+  if (savePassword !== previousSavePassword) body.savePassword = savePassword;
   const errEl = document.getElementById(id + '-err');
   errEl.textContent = '';
   if (!Object.keys(body).length) { errEl.textContent = 'Nothing to change'; return; }
@@ -185,14 +203,16 @@ async function save(name, id) {
 async function addConn(connectAfter = true) {
   const nameEl = document.getElementById('new-name');
   const urlEl = document.getElementById('new-url');
+  const savePwEl = document.getElementById('new-save-pw');
   const errEl = document.getElementById('new-err');
   const name = nameEl.value.trim();
   const url = urlEl.value.trim();
+  const savePassword = savePwEl.checked;
   errEl.textContent = '';
   if (!name || !url) { errEl.textContent = 'Both fields are required'; return; }
   try {
-    await api('/api/connections', { method: 'POST', body: JSON.stringify({ name, url, connect: connectAfter }) });
-    nameEl.value = ''; urlEl.value = '';
+    await api('/api/connections', { method: 'POST', body: JSON.stringify({ name, url, savePassword, connect: connectAfter }) });
+    nameEl.value = ''; urlEl.value = ''; savePwEl.checked = false;
     load();
   } catch (e) { errEl.textContent = e.message; }
 }

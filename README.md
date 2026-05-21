@@ -104,9 +104,13 @@ Once the server is running, point any MCP client at `http://127.0.0.1:7432/mcp`.
 
 ## Storage
 
-Saved connections live in `connections.json` at the repo root (mode `0600`, gitignored). Under Docker this file is bind-mounted into the container, so edits made in the UI persist on the host. The file stores the PostgreSQL URL **with the password stripped** — only host, port, user, and database name are persisted. Passwords are entered at the management UI on each `Connect` and live only in the pg pool's memory; they are never written to disk. After the MCP server restarts, you must re-enter the password to reconnect.
+Saved connections live in `connections.json` at the repo root (mode `0600`, gitignored). Under Docker this file is bind-mounted into the container, so edits made in the UI persist on the host.
 
-On first load after upgrading, any password embedded in an existing `connections.json` is automatically stripped from the file.
+By default, the file stores the PostgreSQL URL **with the password stripped** — only host, port, user, and database name are persisted. Passwords are entered at the management UI on each `Connect` and live only in the pg pool's memory. After the MCP server restarts you must re-enter the password to reconnect.
+
+If you tick **Save password in connections.json** (when adding a new connection or editing an existing one), the password is kept inside the stored URL and the entry is flagged with `"savePassword": true`. Connections with a saved password reconnect without prompting. Use this only on trusted machines — the file is `0600` but still plain text on disk.
+
+On first load after upgrading, any password embedded in an existing `connections.json` entry that is **not** flagged `"savePassword": true` is automatically stripped from the file.
 
 ## Project layout
 

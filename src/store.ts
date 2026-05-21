@@ -8,6 +8,7 @@ const FILE = path.join(DIR, "connections.json");
 export interface Connection {
   name: string;
   url: string;
+  savePassword?: boolean;
 }
 
 export function configPath(): string {
@@ -27,6 +28,14 @@ export function stripPassword(url: string): string {
   }
 }
 
+export function hasPassword(url: string): boolean {
+  try {
+    return !!new URL(url).password;
+  } catch {
+    return false;
+  }
+}
+
 export async function loadAll(): Promise<Connection[]> {
   let raw: Connection[];
   try {
@@ -41,6 +50,7 @@ export async function loadAll(): Promise<Connection[]> {
   }
   let dirty = false;
   const cleaned = raw.map((c) => {
+    if (c.savePassword === true) return { name: c.name, url: c.url, savePassword: true };
     const stripped = stripPassword(c.url);
     if (stripped !== c.url) dirty = true;
     return { name: c.name, url: stripped };
@@ -59,14 +69,18 @@ async function saveAll(connections: Connection[]): Promise<void> {
 export async function upsert({
   name,
   url,
+  savePassword,
 }: Connection): Promise<Connection[]> {
   if (!name || typeof name !== "string") throw new Error("name required");
   if (!url || typeof url !== "string") throw new Error("url required");
-  const cleanUrl = stripPassword(url);
+  const storedUrl = savePassword ? url : stripPassword(url);
+  const entry: Connection = savePassword
+    ? { name, url: storedUrl, savePassword: true }
+    : { name, url: storedUrl };
   const list = await loadAll();
   const idx = list.findIndex((c) => c.name === name);
-  if (idx >= 0) list[idx] = { name, url: cleanUrl };
-  else list.push({ name, url: cleanUrl });
+  if (idx >= 0) list[idx] = entry;
+  else list.push(entry);
   await saveAll(list);
   return list;
 }

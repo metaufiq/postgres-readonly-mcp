@@ -106,6 +106,8 @@ export function startWebServer({
             name: c.name,
             url_info: urlInfo(c.url),
             active: manager.isActive(c.name),
+            save_password: c.savePassword === true,
+            has_saved_password: c.savePassword === true && store.hasPassword(c.url),
           })),
         });
       }
@@ -117,7 +119,8 @@ export function startWebServer({
         }
         const name = String(body.name);
         const url = String(body.url);
-        await store.upsert({ name, url });
+        const savePassword = body.savePassword === true;
+        await store.upsert({ name, url, savePassword });
         if (body.connect) {
           let password: string | undefined;
           try {
@@ -151,8 +154,30 @@ export function startWebServer({
           await store.rename(name, String(body.name));
           currentName = String(body.name);
         }
+
+        const savePasswordChanged =
+          typeof body.savePassword === "boolean" &&
+          body.savePassword !== (existing.savePassword === true);
+        const nextSavePassword =
+          typeof body.savePassword === "boolean"
+            ? body.savePassword
+            : existing.savePassword === true;
+
         if (body.url) {
-          await store.upsert({ name: currentName, url: String(body.url) });
+          await store.upsert({
+            name: currentName,
+            url: String(body.url),
+            savePassword: nextSavePassword,
+          });
+        } else if (savePasswordChanged) {
+          const latest = await store.get(currentName);
+          if (latest) {
+            await store.upsert({
+              name: currentName,
+              url: latest.url,
+              savePassword: nextSavePassword,
+            });
+          }
         }
         return json(res, 200, { ok: true, name: currentName });
       }
