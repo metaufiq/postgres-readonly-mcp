@@ -146,6 +146,10 @@ function askPassword(name) {
           + '<label>Password (leave blank if using .pgpass or trust auth)</label>'
           + '<input id="pw-input" type="password" autocomplete="current-password">'
         + '</div>'
+        + '<div class="checkbox-field">'
+          + '<input type="checkbox" id="pw-save">'
+          + '<label for="pw-save">Save password in connections.json</label>'
+        + '</div>'
         + '<div class="actions">'
           + '<button id="pw-cancel">Cancel</button>'
           + '<button id="pw-ok" class="primary">Connect</button>'
@@ -153,12 +157,14 @@ function askPassword(name) {
       + '</div>';
     document.body.appendChild(backdrop);
     const input = backdrop.querySelector('#pw-input');
+    const saveEl = backdrop.querySelector('#pw-save');
     const cleanup = (val) => { document.body.removeChild(backdrop); resolve(val); };
-    backdrop.querySelector('#pw-ok').onclick = () => cleanup(input.value);
+    const submit = () => cleanup({ password: input.value, savePassword: saveEl.checked });
+    backdrop.querySelector('#pw-ok').onclick = submit;
     backdrop.querySelector('#pw-cancel').onclick = () => cleanup(null);
     backdrop.addEventListener('click', e => { if (e.target === backdrop) cleanup(null); });
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter') cleanup(input.value);
+      if (e.key === 'Enter') submit();
       else if (e.key === 'Escape') cleanup(null);
     });
     input.focus();
@@ -168,9 +174,9 @@ function askPassword(name) {
 async function act(name, action, hasSavedPassword) {
   let opts = { method: 'POST' };
   if (action === 'connect' && !hasSavedPassword) {
-    const pw = await askPassword(name);
-    if (pw === null) return;
-    opts.body = JSON.stringify({ password: pw });
+    const result = await askPassword(name);
+    if (result === null) return;
+    opts.body = JSON.stringify({ password: result.password, savePassword: result.savePassword });
   }
   try { await api('/api/connections/' + encodeURIComponent(name) + '/' + action, opts); }
   catch (e) { alert(e.message); }

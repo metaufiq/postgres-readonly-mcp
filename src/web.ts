@@ -208,12 +208,26 @@ export function startWebServer({
           typeof body.password === "string" && body.password
             ? body.password
             : undefined;
+        const savePassword = body.savePassword === true;
         try {
           await manager.connect(name, cfg.url, password);
-          return json(res, 200, { ok: true });
         } catch (err) {
           return json(res, 502, { error: (err as Error).message });
         }
+        if (savePassword && password) {
+          let urlWithPassword = cfg.url;
+          try {
+            const parsed = new URL(cfg.url);
+            parsed.password = password;
+            urlWithPassword = parsed.toString();
+          } catch {}
+          await store.upsert({
+            name,
+            url: urlWithPassword,
+            savePassword: true,
+          });
+        }
+        return json(res, 200, { ok: true });
       }
 
       json(res, 404, { error: "not found" });
