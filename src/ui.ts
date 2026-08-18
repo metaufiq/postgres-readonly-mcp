@@ -15,6 +15,7 @@ export const HTML = `<!doctype html>
   .badge { padding: 2px 8px; border-radius: 12px; font-size: 11px; vertical-align: middle; margin-left: .5rem; }
   .badge.active { background: #10b98133; color: #059669; }
   .badge.idle { background: rgba(127,127,127,.2); color: #888; }
+  .badge.stale { background: #f59e0b33; color: #d97706; }
   button { font: inherit; padding: 6px 12px; border: 1px solid rgba(127,127,127,.4); background: transparent; border-radius: 5px; cursor: pointer; color: inherit; }
   button.primary { background: #2563eb; color: white; border-color: #2563eb; }
   button.danger { color: #dc2626; border-color: #fca5a5; }
@@ -96,14 +97,20 @@ function renderCard(c) {
   const meta = i.host
     ? (i.user ? i.user + '@' : '') + i.host + (i.port ? ':' + i.port : '') + '/' + (i.db || '')
     : '(unparseable url)';
-  const badge = c.active
-    ? '<span class="badge active">connected</span>'
-    : '<span class="badge idle">idle</span>';
+  const badge = c.stale
+    ? '<span class="badge stale">stale — reconnect needed</span>'
+    : c.active
+      ? '<span class="badge active">connected</span>'
+      : '<span class="badge idle">idle</span>';
   const n = jsAttr(c.name);
   const id = 'c-' + encodeURIComponent(c.name).replace(/%/g, '_');
-  const connectBtn = c.active
-    ? '<button onclick="act(\\'' + n + '\\', \\'disconnect\\')">Disconnect</button>'
-    : '<button class="primary" onclick="act(\\'' + n + '\\', \\'connect\\', ' + (c.has_saved_password ? 'true' : 'false') + ')">Connect</button>';
+  const connectCall = 'act(\\'' + n + '\\', \\'connect\\', ' + (c.has_saved_password ? 'true' : 'false') + ')';
+  const connectBtn = c.stale
+    ? '<button class="primary" onclick="' + connectCall + '">Reconnect</button>'
+      + '<button onclick="act(\\'' + n + '\\', \\'disconnect\\')">Disconnect</button>'
+    : c.active
+      ? '<button onclick="act(\\'' + n + '\\', \\'disconnect\\')">Disconnect</button>'
+      : '<button class="primary" onclick="' + connectCall + '">Connect</button>';
   return '<div class="card" id="' + id + '">'
     + '<div class="row">'
       + '<div style="flex:1; min-width:200px">'

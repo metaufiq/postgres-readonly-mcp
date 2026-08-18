@@ -51,6 +51,27 @@ export class ConnectionManager {
     return this.pools.has(name);
   }
 
+  async isHealthy(name: string, timeoutMs = 2000): Promise<boolean> {
+    const pool = this.pools.get(name);
+    if (!pool) return false;
+    let timer: NodeJS.Timeout | undefined;
+    const ping = pool.query("SELECT 1");
+    ping.catch(() => {});
+    try {
+      await Promise.race([
+        ping,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("health check timed out")), timeoutMs);
+        }),
+      ]);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   listActive(): string[] {
     return Array.from(this.pools.keys());
   }

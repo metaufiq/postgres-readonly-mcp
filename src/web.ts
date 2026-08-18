@@ -101,15 +101,25 @@ export function startWebServer({
 
       if (req.method === "GET" && u.pathname === "/api/connections") {
         const list = await store.loadAll();
-        return json(res, 200, {
-          connections: list.map((c) => ({
-            name: c.name,
-            url_info: urlInfo(c.url),
-            active: manager.isActive(c.name),
-            save_password: c.savePassword === true,
-            has_saved_password: c.savePassword === true && store.hasPassword(c.url),
-          })),
-        });
+        const connections = await Promise.all(
+          list.map(async (c) => {
+            const active = manager.isActive(c.name);
+            const stale = active && !(await manager.isHealthy(c.name));
+            return {
+              name: c.name,
+              url_info: urlInfo(c.url),
+              active,
+              stale,
+              save_password: c.savePassword === true,
+              has_saved_password: c.savePassword === true && store.hasPassword(c.url),
+            };
+          }),
+        );
+        connections.sort((a, b) =>
+          (a.url_info?.db || a.name).localeCompare(b.url_info?.db || b.name) ||
+          a.name.localeCompare(b.name),
+        );
+        return json(res, 200, { connections });
       }
 
       if (req.method === "POST" && u.pathname === "/api/connections") {
