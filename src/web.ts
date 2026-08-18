@@ -115,10 +115,7 @@ export function startWebServer({
             };
           }),
         );
-        connections.sort((a, b) =>
-          (a.url_info?.db || a.name).localeCompare(b.url_info?.db || b.name) ||
-          a.name.localeCompare(b.name),
-        );
+        connections.sort((a, b) => a.name.localeCompare(b.name));
         return json(res, 200, { connections });
       }
 
